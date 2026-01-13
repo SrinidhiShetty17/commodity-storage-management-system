@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import mysql.connector
 
 app = Flask(__name__)
@@ -13,30 +13,40 @@ def get_db_connection():
     )
 
 # ---------- ROUTE: GET FACTORIES ----------
-@app.route("/factories", methods=["GET"])
-def get_factories():
+@app.route('/factories', methods=['GET', 'POST'])
+def factories():
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("""
-        SELECT factory_id, factory_name, location
-        FROM factories
-    """)
+    # ---------- GET ----------
+    if request.method == 'GET':
+        cursor.execute("SELECT * FROM factories")
+        factories = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify(factories)
 
-    factories = cursor.fetchall()
+    # ---------- POST ----------
+    if request.method == 'POST':
+        data = request.get_json()
 
-    result = []
-    for f in factories:
-        result.append({
-            "factory_id": f[0],
-            "factory_name": f[1],
-            "location": f[2]
-        })
+        factory_name = data.get('factory_name')
+        location = data.get('location')
 
-    cursor.close()
-    conn.close()
+        if not factory_name or not location:
+            return jsonify({"error": "factory_name and location are required"}), 400
 
-    return jsonify(result)
+        cursor.execute(
+            "INSERT INTO factories (factory_name, location) VALUES (%s, %s)",
+            (factory_name, location)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "Factory added successfully"}), 201
+
 
 # ---------- ROOT CHECK ----------
 @app.route("/")
@@ -44,5 +54,32 @@ def home():
     return {"status": "Backend running successfully"}
 
 # ---------- RUN SERVER ----------
+if __name__ == "__main__":
+    app.run(debug=True)
+
+@app.route("/factories", methods=["POST"])
+def add_factory():
+    data = request.get_json()
+
+    factory_name = data.get("factory_name")
+    location = data.get("location")
+
+    if not factory_name or not location:
+        return jsonify({"error": "factory_name and location are required"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO factories (factory_name, location) VALUES (%s, %s)",
+        (factory_name, location)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Factory added successfully"}), 201
+
+
 if __name__ == "__main__":
     app.run(debug=True)
