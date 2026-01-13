@@ -5,3 +5,11 @@ Content-Type: application/json
   "factory_name": "Delta Industries",
   "location": "Hyderabad"
 }
+###
+POST http://127.0.0.1:5000/commodities
+Content-Type: application/json
+
+{
+  "commodity_name": "Rice",
+  "unit": "kg"
+}

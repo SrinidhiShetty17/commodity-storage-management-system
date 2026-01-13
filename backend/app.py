@@ -47,6 +47,52 @@ def factories():
 
         return jsonify({"message": "Factory added successfully"}), 201
 
+@app.route("/commodities", methods=["GET"])
+def get_commodities():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM commodities")
+    commodities = cursor.fetchall()
+
+    result = []
+    for c in commodities:
+        result.append({
+            "commodity_id": c[0],
+            "commodity_name": c[1],
+            "unit": c[2]
+        })
+
+    cursor.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route("/commodities", methods=["POST"])
+def add_commodity():
+    data = request.get_json()
+
+    commodity_name = data.get("commodity_name")
+    unit = data.get("unit")
+
+    if not commodity_name or not unit:
+        return jsonify({"error": "commodity_name and unit are required"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO commodities (commodity_name, unit) VALUES (%s, %s)",
+        (commodity_name, unit)
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({"message": "Commodity added successfully"}), 201
+
 
 # ---------- ROOT CHECK ----------
 @app.route("/")
