@@ -1,0 +1,7 @@
+POST http://127.0.0.1:5000/factories
+Content-Type: application/json
+
+{
+  "factory_name": "Delta Industries",
+  "location": "Hyderabad"
+}
