@@ -176,7 +176,7 @@ def create_transaction():
             cursor.close()
         if conn:
             conn.close()
-            
+
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
     conn = get_db_connection()
@@ -198,6 +198,51 @@ def get_transactions():
     cursor.close()
     conn.close()
     return jsonify(result)
+
+@app.route('/inventory', methods=['GET'])
+def get_inventory():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            f.factory_id,
+            f.factory_name,
+            c.commodity_id,
+            c.commodity_name,
+            SUM(
+                CASE
+                    WHEN t.transaction_type = 'IN' THEN t.quantity
+                    WHEN t.transaction_type = 'OUT' THEN -t.quantity
+                END
+            ) AS current_stock
+        FROM transactions t
+        JOIN factories f ON t.factory_id = f.factory_id
+        JOIN commodities c ON t.commodity_id = c.commodity_id
+        GROUP BY
+            f.factory_id, f.factory_name,
+            c.commodity_id, c.commodity_name
+        ORDER BY f.factory_id, c.commodity_id;
+    """
+
+    cur.execute(query)
+    rows = cur.fetchall()
+
+    inventory = []
+    for row in rows:
+        inventory.append({
+            "factory_id": row[0],
+            "factory_name": row[1],
+            "commodity_id": row[2],
+            "commodity_name": row[3],
+            "current_stock": row[4]
+        })
+
+    cur.close()
+    conn.close()
+
+    return jsonify(inventory), 200
+
 
 
 if __name__ == "__main__":
