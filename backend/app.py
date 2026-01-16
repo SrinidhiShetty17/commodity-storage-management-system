@@ -130,7 +130,6 @@ from datetime import datetime
 def create_transaction():
     data = request.get_json()
 
-    # Validate input
     required_fields = [
         "factory_id",
         "commodity_id",
@@ -146,36 +145,58 @@ def create_transaction():
     if data["transaction_type"] not in ["IN", "OUT"]:
         return jsonify({"error": "transaction_type must be IN or OUT"}), 400
 
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-        query = """
+    # 🔹 Calculate current stock
+    cursor.execute(
+        """
+        SELECT COALESCE(
+            SUM(
+                CASE
+                    WHEN transaction_type = 'IN' THEN quantity
+                    WHEN transaction_type = 'OUT' THEN -quantity
+                END
+            ), 0)
+        FROM transactions
+        WHERE factory_id = %s AND commodity_id = %s;
+        """,
+        (data["factory_id"], data["commodity_id"])
+    )
+
+    current_stock = cursor.fetchone()[0]
+
+    # 🔒 Stock validation
+    if data["transaction_type"] == "OUT" and data["quantity"] > current_stock:
+        cursor.close()
+        conn.close()
+        return jsonify({
+            "error": "Insufficient stock",
+            "available_stock": current_stock
+        }), 400
+
+    # ✅ Insert transaction
+    cursor.execute(
+        """
         INSERT INTO transactions
         (factory_id, commodity_id, quantity, transaction_type, transaction_date)
         VALUES (%s, %s, %s, %s, %s)
-        """
-
-        cursor.execute(query, (
+        """,
+        (
             data["factory_id"],
             data["commodity_id"],
             data["quantity"],
             data["transaction_type"],
             data["transaction_date"]
-        ))
+        )
+    )
 
-        conn.commit()
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-        return jsonify({"message": "Transaction recorded successfully"}), 201
+    return jsonify({"message": "Transaction recorded successfully"}), 201
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
 
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
@@ -243,6 +264,49 @@ def get_inventory():
 
     return jsonify(inventory), 200
 
+@app.route("/reports/daily", methods=["GET"])
+def daily_report():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+        SELECT
+            DATE(t.transaction_date) AS date,
+            f.factory_name,
+            c.commodity_name,
+            SUM(CASE WHEN t.transaction_type = 'IN' THEN t.quantity ELSE 0 END) AS total_in,
+            SUM(CASE WHEN t.transaction_type = 'OUT' THEN t.quantity ELSE 0 END) AS total_out,
+            SUM(
+                CASE
+                    WHEN t.transaction_type = 'IN' THEN t.quantity
+                    WHEN t.transaction_type = 'OUT' THEN -t.quantity
+                END
+            ) AS net_movement
+        FROM transactions t
+        JOIN factories f ON t.factory_id = f.factory_id
+        JOIN commodities c ON t.commodity_id = c.commodity_id
+        GROUP BY DATE(t.transaction_date), f.factory_name, c.commodity_name
+        ORDER BY date DESC;
+    """
+
+    cursor.execute(query)
+    rows = cursor.fetchall()
+
+    report = []
+    for r in rows:
+        report.append({
+            "date": str(r[0]),
+            "factory_name": r[1],
+            "commodity_name": r[2],
+            "total_in": r[3],
+            "total_out": r[4],
+            "net_movement": r[5]
+        })
+
+    cursor.close()
+    conn.close()
+
+    return jsonify(report), 200
 
 
 if __name__ == "__main__":
