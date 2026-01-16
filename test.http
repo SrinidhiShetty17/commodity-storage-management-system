@@ -13,3 +13,15 @@ Content-Type: application/json
   "commodity_name": "Rice",
   "unit": "kg"
 }
+###
+
+POST http://127.0.0.1:5000/transactions
+Content-Type: application/json
+
+{
+  "factory_id": 1,
+  "commodity_id": 1,
+  "quantity": 500,
+  "transaction_type": "IN",
+  "transaction_date": "2026-01-13"
+}

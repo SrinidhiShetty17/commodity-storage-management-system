@@ -99,10 +99,6 @@ def add_commodity():
 def home():
     return {"status": "Backend running successfully"}
 
-# ---------- RUN SERVER ----------
-if __name__ == "__main__":
-    app.run(debug=True)
-
 @app.route("/factories", methods=["POST"])
 def add_factory():
     data = request.get_json()
@@ -125,6 +121,83 @@ def add_factory():
     conn.close()
 
     return jsonify({"message": "Factory added successfully"}), 201
+
+
+
+from datetime import datetime
+
+@app.route("/transactions", methods=["POST"])
+def create_transaction():
+    data = request.get_json()
+
+    # Validate input
+    required_fields = [
+        "factory_id",
+        "commodity_id",
+        "quantity",
+        "transaction_type",
+        "transaction_date"
+    ]
+
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"{field} is required"}), 400
+
+    if data["transaction_type"] not in ["IN", "OUT"]:
+        return jsonify({"error": "transaction_type must be IN or OUT"}), 400
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = """
+        INSERT INTO transactions
+        (factory_id, commodity_id, quantity, transaction_type, transaction_date)
+        VALUES (%s, %s, %s, %s, %s)
+        """
+
+        cursor.execute(query, (
+            data["factory_id"],
+            data["commodity_id"],
+            data["quantity"],
+            data["transaction_type"],
+            data["transaction_date"]
+        ))
+
+        conn.commit()
+
+        return jsonify({"message": "Transaction recorded successfully"}), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+            
+@app.route("/transactions", methods=["GET"])
+def get_transactions():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM transactions")
+    rows = cursor.fetchall()
+
+    result = []
+    for r in rows:
+        result.append({
+            "transaction_id": r[0],
+            "factory_id": r[1],
+            "commodity_id": r[2],
+            "quantity": r[3],
+            "transaction_type": r[4],
+            "transaction_date": r[5]
+        })
+
+    cursor.close()
+    conn.close()
+    return jsonify(result)
 
 
 if __name__ == "__main__":
