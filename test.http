@@ -25,3 +25,33 @@ Content-Type: application/json
   "transaction_type": "IN",
   "transaction_date": "2026-01-13"
 }
+
+### INVALID OUT TRANSACTION TEST
+POST http://127.0.0.1:5000/transactions
+Content-Type: application/json
+
+{
+  "factory_id": 1,
+  "commodity_id": 1,
+  "quantity": 5,
+  "transaction_type": "OUT",
+  "transaction_date": "2026-01-16"
+}
+
+### Monthly movement report
+GET http://127.0.0.1:5000/reports/monthly
+
+
+### Monthly closing stock report
+GET http://127.0.0.1:5000/reports/monthly-closing
+
+###
+POST http://127.0.0.1:5000/transactions
+Content-Type: application/json
+
+{
+  "commodity_id": 1,
+  "transaction_type": "OUT",
+  "quantity": 5,
+  "transaction_date": "2025-02-10"
+}

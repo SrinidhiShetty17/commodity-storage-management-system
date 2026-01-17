@@ -127,69 +127,57 @@ def add_factory():
 from datetime import datetime
 
 @app.route("/transactions", methods=["POST"])
-def create_transaction():
-    data = request.get_json()
+def add_transaction():
+    data = request.json
 
-    required_fields = [
-        "factory_id",
-        "commodity_id",
-        "quantity",
-        "transaction_type",
-        "transaction_date"
-    ]
+    commodity_id = data.get("commodity_id")
+    transaction_type = data.get("transaction_type")
+    quantity = data.get("quantity")
+    transaction_date = data.get("transaction_date")
 
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"{field} is required"}), 400
-
-    if data["transaction_type"] not in ["IN", "OUT"]:
-        return jsonify({"error": "transaction_type must be IN or OUT"}), 400
+    if not all([commodity_id, transaction_type, quantity, transaction_date]):
+        return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
 
-    # 🔹 Calculate current stock
-    cursor.execute(
+    # ✅ STOCK VALIDATION FOR OUT
+    if transaction_type == "OUT":
+        stock_query = """
+            SELECT COALESCE(
+                SUM(
+                    CASE
+                        WHEN transaction_type = 'IN' THEN quantity
+                        WHEN transaction_type = 'OUT' THEN -quantity
+                    END
+                ), 0
+            ) AS current_stock
+            FROM transactions
+            WHERE commodity_id = %s;
         """
-        SELECT COALESCE(
-            SUM(
-                CASE
-                    WHEN transaction_type = 'IN' THEN quantity
-                    WHEN transaction_type = 'OUT' THEN -quantity
-                END
-            ), 0)
-        FROM transactions
-        WHERE factory_id = %s AND commodity_id = %s;
-        """,
-        (data["factory_id"], data["commodity_id"])
-    )
+        cursor.execute(stock_query, (commodity_id,))
+        current_stock = cursor.fetchone()["current_stock"]
 
-    current_stock = cursor.fetchone()[0]
+        if current_stock < quantity:
+            cursor.close()
+            conn.close()
+            return jsonify({
+                "error": "Insufficient stock",
+                "available_stock": current_stock
+            }), 400
 
-    # 🔒 Stock validation
-    if data["transaction_type"] == "OUT" and data["quantity"] > current_stock:
-        cursor.close()
-        conn.close()
-        return jsonify({
-            "error": "Insufficient stock",
-            "available_stock": current_stock
-        }), 400
-
-    # ✅ Insert transaction
-    cursor.execute(
-        """
+    # ✅ INSERT TRANSACTION
+    insert_query = """
         INSERT INTO transactions
-        (factory_id, commodity_id, quantity, transaction_type, transaction_date)
-        VALUES (%s, %s, %s, %s, %s)
-        """,
-        (
-            data["factory_id"],
-            data["commodity_id"],
-            data["quantity"],
-            data["transaction_type"],
-            data["transaction_date"]
-        )
-    )
+        (commodity_id, transaction_type, quantity, transaction_date)
+        VALUES (%s, %s, %s, %s)
+    """
+    cursor.execute(insert_query, (
+        commodity_id,
+        transaction_type,
+        quantity,
+        transaction_date
+    ))
 
     conn.commit()
     cursor.close()
