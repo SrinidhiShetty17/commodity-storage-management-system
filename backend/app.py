@@ -307,7 +307,82 @@ def daily_report():
     conn.close()
 
     return jsonify(report), 200
+@app.route('/reports/monthly', methods=['GET'])
+def monthly_report():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
+    query = """
+    SELECT
+    commodity_id,
+    YEAR(transaction_date) AS year,
+    MONTH(transaction_date) AS month,
+    SUM(
+        CASE
+            WHEN transaction_type = 'IN' THEN quantity
+            WHEN transaction_type = 'OUT' THEN -quantity
+        END
+    ) AS net_quantity
+FROM transactions
+GROUP BY commodity_id, YEAR(transaction_date), MONTH(transaction_date)
+ORDER BY year DESC, month DESC;
+
+"""
+    cursor.execute(query)
+    result = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return jsonify(result), 200
+
+@app.route("/reports/monthly-closing", methods=["GET"])
+def monthly_closing_report():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    query = """
+        SELECT
+            commodity_id,
+            YEAR(transaction_date) AS year,
+            MONTH(transaction_date) AS month,
+            SUM(
+                CASE
+                    WHEN transaction_type = 'IN' THEN quantity
+                    WHEN transaction_type = 'OUT' THEN -quantity
+                END
+            ) AS net_quantity
+        FROM transactions
+        GROUP BY commodity_id, YEAR(transaction_date), MONTH(transaction_date)
+        ORDER BY commodity_id, year, month;
+    """
+
+    cursor.execute(query)
+    monthly_data = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    result = []
+    stock_tracker = {}
+
+    for row in monthly_data:
+        key = (row["commodity_id"], row["year"])
+
+        if key not in stock_tracker:
+            stock_tracker[key] = 0
+
+        stock_tracker[key] += int(row["net_quantity"])
+
+        result.append({
+            "commodity_id": row["commodity_id"],
+            "year": row["year"],
+            "month": row["month"],
+            "net_quantity": int(row["net_quantity"]),
+            "closing_stock": stock_tracker[key]
+        })
+
+    return jsonify(result), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
