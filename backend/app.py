@@ -145,13 +145,13 @@ def add_factory():
 from datetime import datetime
 @app.route('/transactions', methods=['POST'])
 def add_transaction():
-    # 1️⃣ Ensure JSON body
+    #   JSON body
     if not request.is_json:
         return error_response("JSON body required", 400)
 
     data = request.json
 
-    # 2️⃣ Required fields check
+    #  Required fields check
     required_fields = [
         "commodity_id",
         "transaction_type",
@@ -163,12 +163,12 @@ def add_transaction():
         if field not in data:
             return error_response(f"{field} is required", 400)
 
-    # 3️⃣ Validate transaction_type
+    #  Validate transaction_type
     transaction_type = data["transaction_type"]
     if transaction_type not in ["IN", "OUT"]:
         return error_response("transaction_type must be IN or OUT", 400)
 
-    # 4️⃣ Validate quantity
+    #  Validate quantity
     try:
         quantity = int(data["quantity"])
         if quantity <= 0:
@@ -176,7 +176,7 @@ def add_transaction():
     except:
         return error_response("quantity must be an integer", 400)
 
-    # 5️⃣ Validate commodity_id
+    #  Validate commodity_id
     try:
         commodity_id = int(data["commodity_id"])
     except:
@@ -184,26 +184,26 @@ def add_transaction():
 
     transaction_date = data["transaction_date"]
 
-    # 6️⃣ DB connection
+    #  DB connection
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        # 7️⃣ Get available stock up to transaction_date
+        #  Get available stock up to transaction_date
         available_stock = get_available_stock(
             cursor,
             commodity_id,
             transaction_date
         )
 
-        # 8️⃣ Validate OUT transaction
+        #  Validate OUT transaction
         if transaction_type == "OUT" and quantity > available_stock:
             return error_response(
                 f"Insufficient stock. Available stock: {available_stock}",
                 400
             )
 
-        # 9️⃣ Insert transaction
+        #  Insert transaction
         insert_query = """
             INSERT INTO transactions
             (commodity_id, transaction_type, quantity, transaction_date)
