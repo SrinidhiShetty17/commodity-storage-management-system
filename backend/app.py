@@ -1,6 +1,21 @@
 from flask import Flask, jsonify, request
 import mysql.connector
 
+def success_response(data=None, message=None, status=200):
+    response = {"success": True}
+    if data is not None:
+        response["data"] = data
+    if message:
+        response["message"] = message
+    return jsonify(response), status
+
+
+def error_response(message, status=400):
+    return jsonify({
+        "success": False,
+        "error": message
+    }), status
+
 app = Flask(__name__)
 
 # ---------- DATABASE CONNECTION ----------
@@ -47,51 +62,54 @@ def factories():
 
         return jsonify({"message": "Factory added successfully"}), 201
 
-@app.route("/commodities", methods=["GET"])
+@app.route('/commodities', methods=['GET'])
 def get_commodities():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM commodities")
-    commodities = cursor.fetchall()
-
-    result = []
-    for c in commodities:
-        result.append({
-            "commodity_id": c[0],
-            "commodity_name": c[1],
-            "unit": c[2]
-        })
+    cursor.execute("SELECT commodity_id, commodity_name FROM commodities")
+    rows = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
-    return jsonify(result)
+    result = []
+    for r in rows:
+        result.append({
+            "id": r[0],
+            "name": r[1]
+        })
 
-@app.route("/commodities", methods=["POST"])
+    return success_response(data=result)
+
+
+@app.route('/commodities', methods=['POST'])
 def add_commodity():
-    data = request.get_json()
+    data = request.json
 
-    commodity_name = data.get("commodity_name")
-    unit = data.get("unit")
-
-    if not commodity_name or not unit:
-        return jsonify({"error": "commodity_name and unit are required"}), 400
+    if not data or 'name' not in data:
+        return error_response("Commodity name is required")
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "INSERT INTO commodities (commodity_name, unit) VALUES (%s, %s)",
-        (commodity_name, unit)
+    try:
+        cursor.execute(
+            "INSERT INTO commodities (name) VALUES (%s)",
+            (data['name'],)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        return error_response("Commodity already exists", 400)
+    finally:
+        cursor.close()
+        conn.close()
+
+    return success_response(
+        message="Commodity added successfully",
+        status=201
     )
-
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({"message": "Commodity added successfully"}), 201
 
 
 # ---------- ROOT CHECK ----------
@@ -125,65 +143,97 @@ def add_factory():
 
 
 from datetime import datetime
-
-@app.route("/transactions", methods=["POST"])
+@app.route('/transactions', methods=['POST'])
 def add_transaction():
+    # 1️⃣ Ensure JSON body
+    if not request.is_json:
+        return error_response("JSON body required", 400)
+
     data = request.json
 
-    commodity_id = data.get("commodity_id")
-    transaction_type = data.get("transaction_type")
-    quantity = data.get("quantity")
-    transaction_date = data.get("transaction_date")
+    # 2️⃣ Required fields check
+    required_fields = [
+        "commodity_id",
+        "transaction_type",
+        "quantity",
+        "transaction_date"
+    ]
 
-    if not all([commodity_id, transaction_type, quantity, transaction_date]):
-        return jsonify({"error": "Missing required fields"}), 400
+    for field in required_fields:
+        if field not in data:
+            return error_response(f"{field} is required", 400)
 
+    # 3️⃣ Validate transaction_type
+    transaction_type = data["transaction_type"]
+    if transaction_type not in ["IN", "OUT"]:
+        return error_response("transaction_type must be IN or OUT", 400)
+
+    # 4️⃣ Validate quantity
+    try:
+        quantity = int(data["quantity"])
+        if quantity <= 0:
+            return error_response("quantity must be greater than 0", 400)
+    except:
+        return error_response("quantity must be an integer", 400)
+
+    # 5️⃣ Validate commodity_id
+    try:
+        commodity_id = int(data["commodity_id"])
+    except:
+        return error_response("commodity_id must be an integer", 400)
+
+    transaction_date = data["transaction_date"]
+
+    # 6️⃣ DB connection
     conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
 
-    # ✅ STOCK VALIDATION FOR OUT
-    if transaction_type == "OUT":
-        stock_query = """
-            SELECT COALESCE(
-                SUM(
-                    CASE
-                        WHEN transaction_type = 'IN' THEN quantity
-                        WHEN transaction_type = 'OUT' THEN -quantity
-                    END
-                ), 0
-            ) AS current_stock
-            FROM transactions
-            WHERE commodity_id = %s;
+    try:
+        # 7️⃣ Get available stock up to transaction_date
+        available_stock = get_available_stock(
+            cursor,
+            commodity_id,
+            transaction_date
+        )
+
+        # 8️⃣ Validate OUT transaction
+        if transaction_type == "OUT" and quantity > available_stock:
+            return error_response(
+                f"Insufficient stock. Available stock: {available_stock}",
+                400
+            )
+
+        # 9️⃣ Insert transaction
+        insert_query = """
+            INSERT INTO transactions
+            (commodity_id, transaction_type, quantity, transaction_date)
+            VALUES (%s, %s, %s, %s)
         """
-        cursor.execute(stock_query, (commodity_id,))
-        current_stock = cursor.fetchone()["current_stock"]
 
-        if current_stock < quantity:
-            cursor.close()
-            conn.close()
-            return jsonify({
-                "error": "Insufficient stock",
-                "available_stock": current_stock
-            }), 400
+        cursor.execute(insert_query, (
+            commodity_id,
+            transaction_type,
+            quantity,
+            transaction_date
+        ))
 
-    # ✅ INSERT TRANSACTION
-    insert_query = """
-        INSERT INTO transactions
-        (commodity_id, transaction_type, quantity, transaction_date)
-        VALUES (%s, %s, %s, %s)
-    """
-    cursor.execute(insert_query, (
-        commodity_id,
-        transaction_type,
-        quantity,
-        transaction_date
-    ))
+        conn.commit()
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+    except Exception as e:
+        conn.rollback()
+        print("Transaction Error:", e)
+        return error_response("Failed to record transaction", 500)
 
-    return jsonify({"message": "Transaction recorded successfully"}), 201
+    finally:
+        cursor.close()
+        conn.close()
+
+    # 🔟 Success response
+    return success_response(
+        message="Transaction recorded successfully",
+        status=201
+    )
+
 
 
 @app.route("/transactions", methods=["GET"])
@@ -301,20 +351,28 @@ def monthly_report():
     cursor = conn.cursor(dictionary=True)
 
     query = """
-    SELECT
-    commodity_id,
-    YEAR(transaction_date) AS year,
-    MONTH(transaction_date) AS month,
-    SUM(
-        CASE
-            WHEN transaction_type = 'IN' THEN quantity
-            WHEN transaction_type = 'OUT' THEN -quantity
-        END
-    ) AS net_quantity
-FROM transactions
-GROUP BY commodity_id, YEAR(transaction_date), MONTH(transaction_date)
-ORDER BY year DESC, month DESC;
-
+     SELECT
+        c.commodity_name,
+        t.commodity_id,
+        YEAR(t.transaction_date) AS year,
+        MONTH(t.transaction_date) AS month,
+        SUM(
+            CASE
+                WHEN t.transaction_type = 'IN' THEN t.quantity
+                WHEN t.transaction_type = 'OUT' THEN -t.quantity
+            END
+        ) AS net_quantity
+    FROM transactions t
+    JOIN commodities c ON t.commodity_id = c.commodity_id
+    GROUP BY
+        c.commodity_name,
+        t.commodity_id,
+        YEAR(t.transaction_date),
+        MONTH(t.transaction_date)
+    ORDER BY
+        c.commodity_name,
+        year,
+        month;
 """
     cursor.execute(query)
     result = cursor.fetchall()
@@ -330,19 +388,28 @@ def monthly_closing_report():
     cursor = conn.cursor(dictionary=True)
 
     query = """
-        SELECT
-            commodity_id,
-            YEAR(transaction_date) AS year,
-            MONTH(transaction_date) AS month,
-            SUM(
-                CASE
-                    WHEN transaction_type = 'IN' THEN quantity
-                    WHEN transaction_type = 'OUT' THEN -quantity
-                END
-            ) AS net_quantity
-        FROM transactions
-        GROUP BY commodity_id, YEAR(transaction_date), MONTH(transaction_date)
-        ORDER BY commodity_id, year, month;
+       SELECT
+        c.commodity_name,
+        t.commodity_id,
+        YEAR(t.transaction_date) AS year,
+        MONTH(t.transaction_date) AS month,
+        SUM(
+            CASE
+                WHEN t.transaction_type = 'IN' THEN t.quantity
+                WHEN t.transaction_type = 'OUT' THEN -t.quantity
+            END
+        ) AS net_quantity
+    FROM transactions t
+    JOIN commodities c ON t.commodity_id = c.commodity_id
+    GROUP BY
+        c.commodity_name,
+        t.commodity_id,
+        YEAR(t.transaction_date),
+        MONTH(t.transaction_date)
+    ORDER BY
+        c.commodity_name,
+        year,
+        month;
     """
 
     cursor.execute(query)
@@ -364,6 +431,7 @@ def monthly_closing_report():
 
         result.append({
             "commodity_id": row["commodity_id"],
+            "commodity_name": row["commodity_name"],
             "year": row["year"],
             "month": row["month"],
             "net_quantity": int(row["net_quantity"]),
@@ -371,6 +439,11 @@ def monthly_closing_report():
         })
 
     return jsonify(result), 200
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print("ERROR:", str(e))  # log to console
+    return error_response("Internal server error", 500)
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -52,6 +52,6 @@ Content-Type: application/json
 {
   "commodity_id": 1,
   "transaction_type": "OUT",
-  "quantity": 5,
+  "quantity": 100,
   "transaction_date": "2025-02-10"
 }
