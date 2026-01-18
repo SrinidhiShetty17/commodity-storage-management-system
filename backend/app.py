@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 import mysql.connector
 
 def success_response(data=None, message=None, status=200):
@@ -15,8 +16,39 @@ def error_response(message, status=400):
         "success": False,
         "error": message
     }), status
+def get_available_stock(cursor, commodity_id, upto_date=None):
+    """
+    Returns available stock for a commodity upto a given date
+    """
+
+    query = """
+        SELECT 
+            IFNULL(SUM(
+                CASE 
+                    WHEN transaction_type = 'IN' THEN quantity
+                    WHEN transaction_type = 'OUT' THEN -quantity
+                END
+            ), 0)
+        FROM transactions
+        WHERE commodity_id = %s
+    """
+
+    params = [commodity_id]
+
+    if upto_date:
+        query += " AND transaction_date <= %s"
+        params.append(upto_date)
+
+    cursor.execute(query, params)
+    result = cursor.fetchone()
+    return int(result[0]) if result and result[0] is not None else 0
+
+
+
 
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
+
 
 # ---------- DATABASE CONNECTION ----------
 def get_db_connection():
@@ -439,6 +471,44 @@ def monthly_closing_report():
         })
 
     return jsonify(result), 200
+@app.route("/reports/stock-as-of", methods=["GET"])
+def stock_as_of():
+    try:
+        commodity_id = request.args.get("commodity_id", type=int)
+        date = request.args.get("date")
+
+        if not commodity_id or not date:
+            return jsonify({
+                "success": False,
+                "error": "commodity_id and date are required"
+            }), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        stock = get_available_stock(cursor, commodity_id, date)
+
+        cursor.close()
+        conn.close()
+
+        # ✅ ZERO STOCK IS VALID
+        return jsonify({
+            "success": True,
+            "commodity_id": commodity_id,
+            "date": date,
+            "available_stock": stock
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
 
 @app.errorhandler(Exception)
 def handle_exception(e):
