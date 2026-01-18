@@ -260,7 +260,7 @@ def add_transaction():
         cursor.close()
         conn.close()
 
-    # 🔟 Success response
+    #  Success response
     return success_response(
         message="Transaction recorded successfully",
         status=201
