@@ -491,7 +491,7 @@ def stock_as_of():
         cursor.close()
         conn.close()
 
-        # ✅ ZERO STOCK IS VALID
+        #  ZERO STOCK IS VALID
         return jsonify({
             "success": True,
             "commodity_id": commodity_id,
@@ -517,3 +517,4 @@ def handle_exception(e):
 
 if __name__ == "__main__":
     app.run(debug=True)
+# to do
